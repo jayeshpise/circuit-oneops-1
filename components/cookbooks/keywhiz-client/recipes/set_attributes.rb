@@ -18,7 +18,7 @@ node.set[:keywhiz_sync_cert_domain] = meta_params["cert_domain"]
 node.set[:keywhiz_service_host] = keywhiz_service_host
 node.set[:keywhiz_service_port] = keywhiz_service_port
 
-node.set[:sync_cert_passphrase] = SecureRandom.base64(3).to_s + "@" + SecureRandom.random_number(10000).to_s + "oO"
+node.set[:sync_cert_passphrase] = "oO" + SecureRandom.base64(7).to_s + "@" + SecureRandom.random_number(1000).to_s 
 #keywhiz_cloud_service[:sync_cert_passphrase]
 
 client_cert = keywhiz_cloud_service[:client_cert]
