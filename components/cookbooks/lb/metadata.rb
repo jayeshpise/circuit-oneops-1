@@ -39,7 +39,7 @@ attribute 'lbmethod',
     :help => 'Select the protocol type',
     :category => '1.Global',
     :order => 2,
-    :form => { 'field' => 'select', 'options_for_select' => [['RoundRobin','roundrobin'],['Least Connections','leastconn']] }
+    :form => { 'field' => 'select', 'options_for_select' => [['RoundRobin','roundrobin'],['Least Connections','leastconn'],['Source IP Hash','sourceiphash']] }
   }
 
 attribute 'stickiness',

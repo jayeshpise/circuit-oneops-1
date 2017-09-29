@@ -129,7 +129,7 @@ def select_provider_network_to_use(tenant, available_network_list)
     Chef::Log.info("subnet_ip_availability:")
     Chef::Log.info(subnet_ip_availability_list.inspect)
     subnet_ip_availability_list.each do | subnet |
-      if subnet["used_ips"] < subnet["total_ips"]
+      if (subnet["total_ips"] - subnet["used_ips"]) >= 3
         return subnet["subnet_id"]
       else
         Chef::Log.info("#{subnet["subnet_name"]} does not have IP availability , so trying to use the next available network}")

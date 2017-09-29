@@ -43,7 +43,7 @@ begin
     existing_lb = lb_manager.get_loadbalancer(lb_name)
 
     #handle changes in listeners only
-
+    
     if config_items_changed.has_key?("listeners")
       #ciBaseAtrribute had old config setting, while ciAttriutes new config changes
       old = JSON.parse(node[:workorder][:rfcCi][:ciBaseAttributes][:listeners])
@@ -58,13 +58,14 @@ begin
       listeners_to_cleanup.each do |listener|
         listener_properties =  listener.split(" ")
         vprotocol = listener_properties[0]
+        vprotocol = 'TCP' if listener_properties[0].upcase == 'SSL_BRIDGE'
         vport = listener_properties[1]
         iprotocol = listener_properties[2]
         iport = listener_properties[3]
         existing_lb.listeners.each do |existing_listener|
-          Chef::Log.info("#{existing_listener.protocol_port} == #{vport} && #{existing_listener.protocol} == #{vprotocol}}")
+          Chef::Log.info("#{existing_listener.protocol_port} == #{vport} && #{existing_listener.protocol} == #{vprotocol}")
           if existing_listener.protocol_port.to_s == vport && existing_listener.protocol == vprotocol.upcase
-            Chef::Log.info("Deleting listener #{existing_lb.id} ... ")
+            Chef::Log.info("Deleting listener #{existing_listener.id} from loadbalancer #{existing_lb.id} ... ")
             listeners_manager.delete_listener(existing_lb.id,existing_listener)
           end
         end
@@ -76,25 +77,40 @@ begin
         vport = listener_properties[1]
         iprotocol = listener_properties[2].upcase
         iport = listener_properties[3]
+
         if (vprotocol == 'HTTP' and iprotocol == 'HTTPS')
           Chef::Log.error(listener)
           Chef::Log.error('Protocol Mismatch in listener config')
           raise Exception, 'Protocol Mismatch in listener config'
         end
-        if vprotocol == 'HTTPS' and iprotocol == 'HTTPS'
-          health_monitor = initialize_health_monitor('TCP', lb_attributes[:ecv_map], lb_name, iport)
-        else
-          health_monitor = initialize_health_monitor(iprotocol, lb_attributes[:ecv_map], lb_name, iport)
-        end
 
         members = initialize_members(subnet_id, iport)
-        pool = initialize_pool(iprotocol, iport, lb_attributes[:lbmethod], lb_name, members, health_monitor, stickiness, persistence_type)
+
+        if (iprotocol == 'SSL_BRIDGE' || iprotocol == 'TCP')
+          health_monitor = initialize_health_monitor('TCP', lb_attributes[:ecv_map], lb_name, iport)
+          pool = initialize_pool('TCP', iport, lb_attributes[:lbmethod], lb_name, members, health_monitor, stickiness, persistence_type)
+        else
+          health_monitor = initialize_health_monitor(iprotocol, lb_attributes[:ecv_map], lb_name, iport)
+          pool = initialize_pool(iprotocol, iport, lb_attributes[:lbmethod], lb_name, members, health_monitor, stickiness, persistence_type)
+        end
+
         new_listener = nil
-        if !barbican_container_name.nil? && !barbican_container_name.empty? && (vprotocol == 'TERMINATED_HTTPS' || vprotocol == 'HTTPS')
-          secret_manager = SecretManager.new(service_lb_attributes[:endpoint], service_lb_attributes[:username],service_lb_attributes[:password], service_lb_attributes[:tenant] )
-          container_ref = secret_manager.get_container(barbican_container_name)
-          Chef::Log.info("Container_ref : #{container_ref}")
-          new_listener = initialize_listener('TERMINATED_HTTPS', vport, lb_name, pool, connection_limit, container_ref)
+        if (vprotocol == 'TERMINATED_HTTPS' || vprotocol == 'HTTPS')
+          if !barbican_container_name.nil? && !barbican_container_name.empty?
+            secret_manager = SecretManager.new(service_lb_attributes[:endpoint], service_lb_attributes[:username],service_lb_attributes[:password], service_lb_attributes[:tenant] )
+            container_ref = secret_manager.get_container(barbican_container_name)
+            Chef::Log.info("Container_ref : #{container_ref}")
+            if iprotocol == 'HTTP'
+              new_listener = initialize_listener('TERMINATED_HTTPS', vport, lb_name, pool, connection_limit, container_ref)
+            elsif iprotocol == 'HTTPS'
+              new_listener = initialize_listener('HTTPS', vport, lb_name, pool, connection_limit, container_ref)
+            end
+          else
+            Chef::Log.error('Barbican cert container not found for HTTPS type protocol')
+            raise Exception, 'Barbican cert container not found for HTTPS type protocol'
+          end
+        elsif (vprotocol == 'SSL_BRIDGE' || vprotocol == 'TCP')
+          new_listener = initialize_listener("TCP", vport, lb_name, pool, connection_limit)
         else
           new_listener = initialize_listener(vprotocol, vport, lb_name, pool, connection_limit)
         end
@@ -106,7 +122,7 @@ begin
           end
         end
         if !is_protocol_port_exist
-          Chef::Log.info("adding new listners ...")
+          Chef::Log.info("adding new listeners ...")
           listeners_manager.add_listener(existing_lb.id, new_listener)
         end
       end

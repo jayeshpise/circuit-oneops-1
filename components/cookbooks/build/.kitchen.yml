@@ -154,3 +154,53 @@ suites:
             repository: "https://github.com/oneops/oneops.git"
             revision: "master"
             install_dir: "/opt/build"
+  - name: contineousBuild
+    run_list:
+      - recipe[kitchen-test-helper]
+      - recipe[build::add]
+    attributes:
+      customer_domain: ""
+      build:
+        migration_command: ""
+        install_dir: "/opt/build"
+        ci: "true"
+        submodules: "false"
+        as_group: ""
+        before_migrate: ""
+        repository: "https://github.com/oneops/oneops.git"
+        revision: 'master'
+        environment: "{}"
+        password: ""
+        depth: "1"
+        as_user: ""
+        before_restart: ""
+        persist: "[]"
+        scm: "git"
+        key: ""
+        username: ""
+        restart_command: ""
+      workorder:
+        services:
+          mirror:
+            dummy:
+              ciAttributes:
+                mirrors: "{}"
+        cloud:
+          ciName: "dummy"
+        payLoad:
+          RealizedAs:
+            -
+              ciName: "build"
+        rfcCi:
+          nsPath: ""
+          ciAttributes:
+            key: ""
+            ci: "true"
+            persist : "[]"
+            environment: "{}"
+            migration_command: ""
+            depth: "1"
+            restart_command: ""
+            repository: "https://github.com/oneops/oneops.git"
+            revision: "master"
+          ciName: "dummy"

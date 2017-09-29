@@ -17,6 +17,7 @@ tenant = TenantModel.new(service_lb_attributes[:endpoint],service_lb_attributes[
                          service_lb_attributes[:username],service_lb_attributes[:password])
 stickiness = lb_attributes[:stickiness]
 persistence_type = lb_attributes[:persistence_type]
+Chef::Log.info("enabled networks: #{service_lb_attributes[:enabled_networks]} ")
 
 subnet_id = select_provider_network_to_use(tenant, service_lb_attributes[:enabled_networks])
 
@@ -40,19 +41,33 @@ node.loadbalancers.each do |loadbalancer|
     Chef::Log.error('Protocol Mismatch in listener config')
     raise Exception, 'Protocol Mismatch in listener config'
   end
-  if vprotocol == 'HTTPS' and iprotocol == 'HTTPS'
-    health_monitor = initialize_health_monitor('TCP', lb_attributes[:ecv_map], lb_name, iport)
-  else
-    health_monitor = initialize_health_monitor(iprotocol, lb_attributes[:ecv_map], lb_name, iport)
-  end
 
   members = initialize_members(subnet_id, iport)
-  pool = initialize_pool(iprotocol, iport, lb_attributes[:lbmethod], lb_name, members, health_monitor, stickiness, persistence_type)
-  if !barbican_container_name.nil? && !barbican_container_name.empty? && (vprotocol == 'TERMINATED_HTTPS' || vprotocol == 'HTTPS')
-    secret_manager = SecretManager.new(service_lb_attributes[:endpoint], service_lb_attributes[:username],service_lb_attributes[:password], service_lb_attributes[:tenant] )
-    container_ref = secret_manager.get_container(barbican_container_name)
-    Chef::Log.info("Container_ref : #{container_ref}")
-    listeners.push(initialize_listener('TERMINATED_HTTPS', vport, lb_name, pool, connection_limit, container_ref))
+
+  if (iprotocol == 'SSL_BRIDGE' || iprotocol == 'TCP')
+    health_monitor = initialize_health_monitor('TCP', lb_attributes[:ecv_map], lb_name, iport)
+    pool = initialize_pool('TCP', iport, lb_attributes[:lbmethod], lb_name, members, health_monitor, stickiness, persistence_type)
+  else
+    health_monitor = initialize_health_monitor(iprotocol, lb_attributes[:ecv_map], lb_name, iport)
+    pool = initialize_pool(iprotocol, iport, lb_attributes[:lbmethod], lb_name, members, health_monitor, stickiness, persistence_type)
+  end
+
+  if (vprotocol == 'TERMINATED_HTTPS' || vprotocol == 'HTTPS')
+    if !barbican_container_name.nil? && !barbican_container_name.empty?
+      secret_manager = SecretManager.new(service_lb_attributes[:endpoint], service_lb_attributes[:username],service_lb_attributes[:password], service_lb_attributes[:tenant] )
+      container_ref = secret_manager.get_container(barbican_container_name)
+      Chef::Log.info("Container_ref : #{container_ref}")
+      if iprotocol == 'HTTP'
+        listeners.push(initialize_listener("TERMINATED_HTTPS", vport, lb_name, pool, connection_limit, container_ref))
+      elsif iprotocol == 'HTTPS'
+        listeners.push(initialize_listener("HTTPS", vport, lb_name, pool, connection_limit))
+      end
+    else
+      Chef::Log.error('Barbican cert container not found for HTTPS type protocol')
+      raise Exception, 'Barbican cert container not found for HTTPS type protocol'
+    end
+  elsif (vprotocol == 'SSL_BRIDGE' || vprotocol == 'TCP')
+    listeners.push(initialize_listener("TCP", vport, lb_name, pool, connection_limit))
   else
     listeners.push(initialize_listener(vprotocol, vport, lb_name, pool, connection_limit))
   end

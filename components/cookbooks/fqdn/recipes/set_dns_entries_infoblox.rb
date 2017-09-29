@@ -196,7 +196,7 @@ node[:entries].each do |entry|
       if node[:dc_entry] 
         if dns_name.downcase.eql?(node[:dc_entry][:name].downcase)
           # Delete existing entry only if it's not dc_entry (active dc_entry)
-          delete_dns(dns_name, existing_entry) if !node[:dc_entry][:values].include?(existing_entry)
+          delete_record(dns_name, existing_entry) if !node[:dc_entry][:values].include?(existing_entry)
         end
       end
     end
