@@ -141,13 +141,6 @@ ruby_block 'check_process' do
       if (metric["metric"] == 'keysync.seconds_since_last_success')
         metric_value = metric['value']
         Chef::Log.info('Last connected successfully ' + metric_value.to_s + ' seconds ago')
-        if (metric_value > 0 && metric_value < 10)
-          Chef::Log.info('keysync working fine.')
-          break
-        else
-          Chef::Log.error('keysync not connected.')
-          exit 1
-        end
       end
     end
   end
