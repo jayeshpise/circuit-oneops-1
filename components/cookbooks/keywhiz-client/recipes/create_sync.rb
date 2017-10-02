@@ -11,7 +11,7 @@ directory '/opt/oneops/keywhiz/keysync/clients' do
   recursive true
 end
 
-# directory '#{node.workorder.rfcCi.ciAttributes.secretsmount}' do
+# directory '#{node.secrets.mount}' do
 #        action :create
 #        recursive true
 # end
@@ -54,7 +54,7 @@ template '/opt/oneops/keywhiz/keysync/config.yaml' do
   source 'keysync-config.erb'
   variables(:user => node.workorder.rfcCi.ciAttributes.user,
             :group => node.workorder.rfcCi.ciAttributes.group,
-            :secrets_dir => node.workorder.rfcCi.ciAttributes.secretsmount,
+            :secrets_dir => node.secrets.mount,
             :server => node.keywhiz_service_host + ":" + node.keywhiz_service_port)
 end
 
@@ -76,7 +76,7 @@ template '/usr/lib/systemd/system/secrets.mount' do
   mode 00644
   variables(:user => node.workorder.rfcCi.ciAttributes.user,
             :group => node.workorder.rfcCi.ciAttributes.group,
-            :secrets_dir => node.workorder.rfcCi.ciAttributes.secretsmount)
+            :secrets_dir => node.secrets.mount)
   only_if {runs_systemd == 1}
 end
 
@@ -95,7 +95,7 @@ template '/etc/init.d/keysync' do
   mode 00755
   variables(:user => node.workorder.rfcCi.ciAttributes.user,
             :group => node.workorder.rfcCi.ciAttributes.group,
-            :secrets_dir => node.workorder.rfcCi.ciAttributes.secretsmount)
+            :secrets_dir => node.secrets.mount)
   only_if {runs_systemd != 1}
 end
 
@@ -138,7 +138,7 @@ ruby_block 'check_process' do
     metrics_string = Net::HTTP.get(uri) # string
     metrics = JSON.parse(metrics_string)
     metrics.each do |metric|
-      if (metric["metric"] == 'keysync.seconds_since_last_success')
+      if metric['metric'] == 'keysync.seconds_since_last_success'
         metric_value = metric['value']
         Chef::Log.info('Last connected successfully ' + metric_value.to_s + ' seconds ago')
       end
