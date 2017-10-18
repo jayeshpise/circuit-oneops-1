@@ -11,10 +11,11 @@ directory '/opt/oneops/keywhiz/keysync/clients' do
   recursive true
 end
 
-# directory '#{node.secrets.mount}' do
-#        action :create
-#        recursive true
-# end
+# Make sure to create the directory for tmpfs mount.
+directory "#{node.secrets.mount}" do
+  action :create
+  recursive true
+end
 
 # download kw-synch tool and start it with the config file
 remote_file '/opt/oneops/keywhiz/keysync/keysync.tar.gz' do
