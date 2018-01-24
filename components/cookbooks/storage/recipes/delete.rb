@@ -19,43 +19,74 @@
 max_retry_count = 5
 cloud_name = node[:workorder][:cloud][:ciName]
 provider_class = node[:workorder][:services][:storage][cloud_name][:ciClassName].downcase
-include_recipe "shared::set_provider"           
-dev_map = node.workorder.rfcCi.ciAttributes["device_map"]
+include_recipe "shared::set_provider_new"
+
+dev_map = node[:workorder][:rfcCi][:ciAttributes][:device_map]
+return if dev_map.nil?
+
 if provider_class =~ /azure/
-  Chef::Log.info("Deleting the data disk ...")
-  include_recipe "azuredatadisk::delete" # delete the datadisk permanently 
-  return true
+  Utils.set_proxy(node[:workorder][:payLoad][:OO_CLOUD_VARS])
+  rg_manager = AzureBase::ResourceGroupManager.new(node)
+  resource_group = rg_manager.rg_name
+  instance_name = node[:workorder][:payLoad][:DependsOn].select{|d| (d[:ciClassName].split('.').last == 'Compute') }.first[:ciAttributes][:instance_name]
+  server = get_compute(provider_class, node[:storage_provider], instance_name, resource_group)
 end
 
-unless dev_map.nil?
-  dev_map.split(" ").each do |dev|
-    dev_parts = dev.split(":")
-    vol_id = dev_parts[0]
+dev_map.split(" ").each do |dev|
+    if provider_class =~ /azure/ && dev.split(":").size == 5
+      resource_group_name, storage_account_name, ciID, slice_size, dev_id = dev.split(':')
+      vol_id = [ciID, 'datadisk',dev.split('/').last.to_s].join('-')
+    else
+      vol_id = dev.split(":")[0]
+    end
     Chef::Log.info("destroying: "+vol_id)
     ok = false
     retry_count = 0
     while !ok && retry_count < max_retry_count do
       ok = true
       volume = nil
+
+      #Getting volume
       begin
-        volume = node.storage_provider.volumes.get vol_id
+        if provider_class =~ /azure/ && vol_id =~ /datadisk/ && !server.nil?
+          volume = server.data_disks.select{|dd| (dd.name == vol_id)}[0]
+        elsif provider_class =~ /azure/ && vol_id !~ /datadisk/
+          volume = node.storage_provider.managed_disks.get(resource_group, vol_id)
+        else
+          volume = node.storage_provider.volumes.get vol_id
+        end
       rescue => e
         Chef::Log.error("getting volume exception: "+e.message)
         next
-      end                      
-      
+      end
+
+      #Detaching volume from VM
       begin
-        unless volume.nil?
+        if provider_class =~ /azure/
+          if vol_id =~ /datadisk/ && !server.nil? && !volume.nil?
+            Chef::Log.info("Detaching unmanaged data disk")
+            server.detach_data_disk(volume.name)
+          elsif volume.respond_to?('owner_id') && !server.nil? && !volume.owner_id.nil?
+            Chef::Log.info("Detaching managed data disk")
+            server.detach_managed_disk(volume.name)
+          end
+        elsif !volume.nil?
           data = { 'os-detach' => { 'volume_id' => "#{vol_id}" } }
-          uuid = "#{vol_id}"
-          node.storage_provider.action(uuid, data)
+          node.storage_provider.action(vol_id, data)
         end
       rescue => e
         Chef::Log.error("getting volume detach exception: "+e.message)
       end
 
+      #Destroying volume
       begin
-        unless volume.nil?
+        if provider_class =~ /azure/ && vol_id =~ /datadisk/
+          #Unmanaged disks
+          vhd_blobname = storage_account_name + '-' + vol_id + ".vhd"
+          storage_service = get_azure_storage_service(rg_manager.creds, resource_group_name, storage_account_name)
+          storage_service.delete_disk(vhd_blobname, options = {})
+
+        elsif !volume.nil?
           volume.destroy
         end
       rescue => e
@@ -63,13 +94,13 @@ unless dev_map.nil?
           Chef::Log.error("volume destroy exception: "+e.message);
           ok = false
         end
-      end 
+      end
 
       retry_count += 1
-      if !ok            
+      if !ok
         sleep_sec = retry_count * 5
         Chef::Log.error("sleeping #{sleep_sec}sec between retries...")
-        sleep(sleep_sec) 
+        sleep(sleep_sec)
       end
     end
     if !ok
@@ -77,5 +108,4 @@ unless dev_map.nil?
       msg = JSON.parse(e.response[:body])[error_key]['message']
       exit_with_error "couldnt destroy: #{vol_id} because #{msg} .. #{error_key}"
     end
-  end
-end       
+end #dev_map.split(" ").each do |dev|

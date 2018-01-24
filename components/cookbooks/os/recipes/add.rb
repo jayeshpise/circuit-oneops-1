@@ -158,7 +158,12 @@ else
 end
 
 # sshd
-execute "cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup"
+file '/etc/ssh/sshd_config.backup' do
+  mode 0644
+  owner 'root'
+  group 'root'
+  content ::File.open('/etc/ssh/sshd_config').read
+end
 
 template "/etc/ssh/sshd_config" do
   cookbook "os"

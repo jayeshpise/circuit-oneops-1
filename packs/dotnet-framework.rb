@@ -72,10 +72,24 @@ resource "chocopackage",
   :design        => true,
   :requires      => {
     :constraint  => "0..1",
-    :help        => "Installs chocolatey package"
+    :help        => "Installs chocolatey package",
+    :services    => '*mirror'
   },
   :attributes       => {
     "chocolatey_package_source" => 'https://chocolatey.org/api/v2/'
+  }
+
+resource "nugetpackage",
+  :cookbook      => "oneops.1.nugetpackage",
+  :design        => true,
+  :requires      => {
+    :constraint  => "0..*",
+    :help        => "Installs nuget package"
+  },
+  :attributes        => {
+    "repository_url" => '',
+    "physical_path"  => '$OO_LOCAL{app_directory}',
+    "install_dir"    => '$OO_LOCAL{platform_deployment}'
   }
 
 
@@ -168,6 +182,7 @@ resource "volume",
   { :from => 'taskscheduler',  :to => 'volume' },
   { :from => 'dotnetframework',  :to => 'os' },
   { :from => 'chocolatey-package', :to => 'volume' },
+  { :from => 'nugetpackage', :to => 'volume' },
   { :from => 'chocopackage', :to => 'os' } ].each do |link|
   relation "#{link[:from]}::depends_on::#{link[:to]}",
     :relation_name => 'DependsOn',
@@ -176,7 +191,7 @@ resource "volume",
     :attributes => { "flex" => false, "min" => 1, "max" => 1 }
 end
 
-[ 'windowsservice', 'taskscheduler', 'dotnetframework','chocolatey-package' ,'volume','os', 'chocopackage' ].each do |from|
+[ 'windowsservice', 'taskscheduler', 'dotnetframework','chocolatey-package' ,'volume','os', 'chocopackage', 'nugetpackage' ].each do |from|
   relation "#{from}::managed_via::compute",
     :except => [ '_default' ],
     :relation_name => 'ManagedVia',

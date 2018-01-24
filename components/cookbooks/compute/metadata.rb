@@ -70,6 +70,8 @@ attribute 'availability_zone',
     :order => 6
   }
 
+
+
 attribute 'required_availability_zone',
   :description => "Required Availability Zone",
   :grouping => 'manifest',
@@ -102,6 +104,15 @@ attribute 'tags',
     :order => 9
   }
 
+attribute 'zone',
+          :description => "Fault and Update Domains",
+          :grouping => 'bom',
+          :data_type => "hash",
+          :format => {
+              :help => 'Zone',
+              :category => '1.Identity',
+              :order => 10
+          }
 
 # state
 
@@ -346,3 +357,4 @@ recipe "status", "Compute Status"
 recipe "reboot", "Reboot Compute"
 recipe "repair", "Repair Compute"
 recipe "powercycle", "Powercycle - HARD reboot"
+recipe "redeploy", "Redeploy Compute - Only works on azure"

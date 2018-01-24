@@ -10,19 +10,39 @@ extend SolrCloud::Util
 # Wire solrcloud util to chef resources.
 Chef::Resource::RubyBlock.send(:include, SolrCloud::Util)
 
-ci = node.workorder.rfcCi.ciAttributes;
-solr_base_url = ci['solr_url']
-solr_package_type = ci['solr_package_type']
-solr_format = ci['solr_format']
+
+begin
+  if node.workorder.ci != nil
+    ci = node.workorder.ci.ciAttributes;
+  end
+rescue
+ensure
+end
+
+begin
+  if node.workorder.rfcCi != nil
+    ci = node.workorder.rfcCi.ciAttributes;
+  end
+rescue
+ensure
+end
+
+solr_package_type = "solr"
+solr_format = "tgz"
 
 solr_download_path = "/tmp";
 solr_file_name = "#{solr_package_type}-"+node['solr_version']+".#{solr_format}"
 solr_file_woext = "#{solr_package_type}-"+node['solr_version']
-solr_url = "#{solr_base_url}/#{solr_package_type}/"+node['solr_version']+"/#{solr_file_name}"
+solr_url = "#{node['solr_base_url']}/#{solr_package_type}/"+node['solr_version']+"/#{solr_file_name}"
 solr_filepath = "#{solr_download_path}/#{solr_file_name}"
 
+ns_path = node.workorder.rfcCi.nsPath.split(/\//)
+oo_org = ns_path[1]
+oo_assembly = ns_path[2]
+oo_environment_name = ns_path[3]
+oo_platform = ns_path[5]
 
-Chef::Log.info("Download solr from : #{solr_url}")
+# Download solr package from path #{solr_url}
 remote_file solr_filepath do
   source "#{solr_url}"
   owner "#{node['solr']['user']}"
@@ -53,7 +73,10 @@ if node['solr_version'].start_with? "4."
     end
   }
 
-  Chef::Log.info('UnPack solr.war and extract the WEB-INF/lib to /app/solr-war-lib/ folder')
+  # Unpacks solr tgz package and extracts solr.war
+  # Copies the WEB-INF/lib jars to /app/solr-war-lib directory
+  # Copies the default configuration files to /app/solr-config/default directory
+  # Copies the ext/libs to tomcat/WEB-INF/lib and /app/solr-war-lib directory
   bash 'unpack_solr_war' do
     code <<-EOH
       cd #{node['user']['dir']}
@@ -80,13 +103,22 @@ if node['solr_version'].start_with? "4."
     not_if { ::File.exists?("#{node['user']['dir']}/solr-#{node['solr_version']}.txt") }
   end
 
-  bash "update_zookeeper_string" do
+  # Inserts zookeeper fqdn connection string to the setenv.sh file
+  bash "insert_zookeeper_config" do
     code <<-EOH
       grep -q -F 'zkHost' #{node['tomcat']['dir']}/bin/setenv.sh || echo 'export CATALINA_OPTS=\"\$CATALINA_OPTS -DzkHost=#{node['zk_host_fqdns']}\"' >> #{node['tomcat']['dir']}/bin/setenv.sh
     EOH
   end
 
-  Chef::Log.info('Create/Update the solr.xml in /solr-cores')
+  # Inserts jmx config properties to the setenv.sh file
+  bash "insert_jmx_config" do
+    code <<-EOH
+      grep -q -F 'jmxremote' #{node['tomcat']['dir']}/bin/setenv.sh || echo 'export CATALINA_OPTS=\"\$CATALINA_OPTS -Djava.awt.headless=true -Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.local.only=false -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.port=#{node['jmx_port']} -Dcom.sun.management.jmxremote.rmi.port=#{node['jmx_port']}\"' >> #{node['tomcat']['dir']}/bin/setenv.sh
+    EOH
+    not_if { "#{node['jmx_port']}".empty? }
+  end
+
+  # Create or Update the #{node['user']['dir']}/solr-cores/solr.xml in /app/solr-cores directory
   cookbook_file "#{node['user']['dir']}/solr-cores/solr.xml" do
     source "solr.xml"
     owner node['solr']['user']
@@ -102,16 +134,19 @@ if node['solr_version'].start_with? "4."
     only_if { ::File.exists?("/etc/init.d/tomcat#{node['tomcatversion']}") }
   end
 
+  # Uploading the default config to zookeeper.
+  # default config is not recommended for production use as it does not have IgnoreCommitUpdateProcessor, hence its commented out here
+  # If really required, it should be uploaded to zookeeper from the command line
+  # uploadDefaultConfig(node['solr_version'],node['zk_host_fqdns'],node['default_config'])
+
 end
 
-
-if (node['solr_version'].start_with? "6.") || (node['solr_version'].start_with? "5.")
+if (node['solr_version'].start_with? "6.") || (node['solr_version'].start_with? "5.") || (node['solr_version'].start_with? "7.")
 
   solr_war_lib_dir = node['user']['dir']+"/solr-war-lib"+node['solrmajorversion']
   solr_config_dir = node['user']['dir']+"/solr-config"+node['solrmajorversion']
 
-
-  ["#{solr_war_lib_dir}" ,"#{solr_config_dir}" ].each { |dir|
+  ["#{solr_war_lib_dir}", "#{solr_config_dir}", "#{node['data_dir_path']}" ].each { |dir|
     Chef::Log.info("creating #{dir} for users")
     directory dir do
       owner node['solr']['user']
@@ -122,13 +157,40 @@ if (node['solr_version'].start_with? "6.") || (node['solr_version'].start_with? 
     end
   }
 
+  # create heap_dump_dir if provided
+  if node["heap_dump_dir"] != nil && !node["heap_dump_dir"].empty?
+  	directory node["heap_dump_dir"] do
+      owner node['solr']['user']
+      group node['solr']['user']
+      mode "0755"
+      recursive true
+      action :create
+    end
+  end
+  # Creates the data symlink to /blockstorage when the volume added is Cinder
+  Chef::Log.info("Will create a symlink between data directory and blockstorage if Cinder is enabled.")
+  # Create the symlink for the data directory in /app/solrdata+#{majorversion} to the mountpoint on the cinder storage
+  if node['enable_cinder'] == "true"
+    Chef::Log.info("Creating a symlink between data directory and blockstorage, since Cinder is enabled.")
+    create_symlink_from_data_to_cinder_mountpoint()
+  else
+    Chef::Log.warn("Will not create a symlink between data directory and blockstorage, since Cinder is disabled.")
+    Chef::Log.info("If data is a symlink, then we will copy the data from Cinder/ symlink to the data directory which is hosted on Ephemeral volume.")
+    include_recipe 'solrcloud::disable_storage'
+  end
+
+  #install_solr_service using -n option to install without starting service
+  install_command = "sudo ./install_solr_service.sh #{solr_download_path}/#{solr_file_name} -i #{node['installation_dir_path']} -d #{node['data_dir_path']} -u #{node['solr']['user']} -p #{node['port_no']} -s solr#{node['solrmajorversion']} -n"
+  Chef::Log.info("install_command = #{install_command}")
+  # Extracts solr tgz package and execute installation script
+  # Copy the lib/ext and WEB-INF/lib jars to /app/solr-war-lib directory
   bash "install_solr_and_copy_jars" do
     code <<-EOH
       cd #{solr_download_path}
       tar -xf #{solr_file_name}
       cd #{solr_file_woext}/bin
       chmod 777 install_solr_service.sh
-      sudo ./install_solr_service.sh #{solr_download_path}/#{solr_file_name} -i #{node['installation_dir_path']} -d #{node['data_dir_path']} -u #{node['solr']['user']} -p #{node['port_no']} -s solr#{node['solrmajorversion']}
+      #{install_command}
       rm -rf /etc/default/solr#{node['solrmajorversion']}.in.sh
       rm -rf #{node['data_dir_path']}/log4j.properties
       cd #{node['installation_dir_path']}/solr#{node['solrmajorversion']}/server/
@@ -139,55 +201,222 @@ if (node['solr_version'].start_with? "6.") || (node['solr_version'].start_with? 
     not_if { ::File.exists?(node['user']['dir']+"/solr-"+node['solr_version']+".txt") }
   end
 
-  Chef::Log.info('log4j.properties file')
+  # maxRequestsPerSec is provided then download and copy the custom filter to server/lib
+  jetty_filter_url = node['solr_custom_params']['jetty_filter_url']
+  if !node['url_max_requests_per_sec_map'].empty?
+    dest_path = "/app/solr-jetty-servlets.jar"
+    jetty_lib_path = "/app/solr#{node['solrmajorversion']}/server/lib"
+    shared_download_http jetty_filter_url do
+      path dest_path
+      mode "0644"
+      action :create
+    end
+    execute "move file to jetty lib" do
+      command "cp #{dest_path} #{jetty_lib_path}"
+    end
+  else
+    Chef::Log.info("Ignoring filter-jar #{jetty_filter_url} because there are no URL-patterns with maxRequestsPerSec attributes")
+  end
+  
+  # Override the web.xml file to include user input. for ex. Url pattern & maxRequestsPerSec for limiting the requests
+  template "/app/solr#{node['solrmajorversion']}/server/solr-webapp/webapp/WEB-INF/web.xml" do
+    owner "root"
+    group "root"
+    mode '0644'
+    source 'web.xml.erb'
+    notifies :run, "ruby_block[solr_restart_warning]", :delayed
+  end
+  
+  # Create or Update #{node['data_dir_path']}/log4j.properties file
   template "#{node['data_dir_path']}/log4j.properties" do
     source 'log4j.properties.solr.erb'
     owner node['solr']['user']
     group node['solr']['user']
     mode '0755'
-    action :create_if_missing
   end
 
-  Chef::Log.info('Create solr.in.sh file')
+  if (node['enable_authentication'] != nil && node['enable_authentication'] == "true")
+    template "#{node['data_dir_path']}/http_client.properties" do
+      source 'http_client.properties.erb'
+      owner node['solr']['user']
+      group node['solr']['user']
+      mode '0755'
+      notifies :run, "ruby_block[solr_restart_warning]", :delayed
+    end
+  end
+
+  # Create or Update #{node['data_dir_path']}/solr.in.sh file
   template "#{node['data_dir_path']}/solr.in.sh" do
     source 'solr.in.sh.erb'
     owner node['solr']['user']
     group node['solr']['user']
     mode '0755'
+    notifies :run, "ruby_block[solr_restart_warning]", :delayed
   end
 
-
-  Chef::Log.info('Create solr service')
+  # Create or Update /etc/init.d/solr#{node['solrmajorversion']} service
   template "/etc/init.d/solr#{node['solrmajorversion']}" do
     source 'solr.erb'
     owner node['solr']['user']
     group node['solr']['user']
     mode '0755'
+    notifies :run, "ruby_block[solr_restart_warning]", :delayed
   end
 
-  execute 'solr-restart' do
-    command "service solr#{node['solrmajorversion']} restart"
-    user "root"
-    action :run
-    only_if { ::File.exists?("/etc/init.d/solr#{node['solrmajorversion']}") }
+  # Create or Update /app/solrdata#{node['solrmajorversion']}/solr.xml
+  template "#{node['data_dir_path']}/data/solr.xml" do
+    source 'solr5.xml.erb'
+    owner node['solr']['user']
+    group node['solr']['user']
+    mode '0755'
+    notifies :run, "ruby_block[solr_restart_warning]", :delayed
   end
 
+  # Uploading the default data driven config to zookeeper.
+  # data-driven-config is not recommended for production use, hence its commented out here
+  # If really required, it should be uploaded to zookeeper from the command line
+  # uploadDefaultConfig(node['solr_version'],node['zk_host_fqdns'],node['default_data_driven_config'])
+
+  remote_directory '/opt/solr/solrmonitor'  do
+    source "solrmonitor"
+    owner 'app'
+    group 'app'
+    mode '0777'
+    files_mode '777'
+    action :create
+  end
+
+  directory '/opt/solr/solrmonitor/spiked-metrics' do
+    owner 'app'
+    group 'app'
+    mode '0755'
+    action :create
+  end
+
+  # Make sure the solr /opt directories exist and have the right permissions
+  %w[ /opt/solr /opt/solr/log ].each do |app_dir|
+    directory app_dir do
+      user 'app'
+      group 'app'
+    end
+  end
+
+  template "/opt/solr/solrmonitor/metrics-tool.rb" do
+    source "metrics-tool.erb"
+    owner 'app'
+    group 'app'
+    mode "0755"
+    variables({
+                  :port_no => node['port_no'],
+                  :enable_medusa_metrics => node['enable_medusa_metrics'],
+                  :medusa_log_file => node['medusa_log_file'],
+                  :solr_version => node['solr_version'],
+                  :metric_level => node['jmx_metrics_level'],
+                  :jolokia_port => node['jolokia_port'],
+                  :solr_jmx_port => node['jmx_port'],
+                  :enable_jmx_metrics => node['enable_jmx_metrics'],
+                  :jmx_medusa_log_file => node['jmx_medusa_log_file'],
+                  :admin_user => user,
+                  :admin_password => '',
+                  :graphite_servers => node['graphite_servers'],
+                  :graphite_prefix => node['graphite_prefix'],
+                  :graphite_logfiles_path => node['graphite_logfiles_path'],
+                  :oo_org => oo_org,
+                  :oo_assembly => oo_assembly,
+                  :oo_env => node['oo_environment'],
+                  :oo_platform => oo_platform,
+                  :oo_cloud => node['oo_cloud'],
+                  :node_ip => node['ipaddress'],
+                  :oo_environment_name => oo_environment_name
+              })
+  end
+
+  file "#{node['medusa_log_file']}" do
+    mode '0644'
+    owner 'root'
+    group 'root'
+    action :create_if_missing
+  end
+
+  file "#{node['jmx_medusa_log_file']}" do
+    mode '0644'
+    owner 'root'
+    group 'root'
+    action :create_if_missing
+  end
+
+  # Check if the enable_medusa_metrics is enabled. If it is true, then push to medusa
+  if (node['enable_medusa_metrics'] == "true" || node['enable_jmx_metrics'] == "true")
+    Chef::Log.info("Enabling the Medusa Metrics, since the flag is true.")
+    cron "metrics-tool" do
+      user 'root'
+      minute "*/1"
+      command "cd /opt/solr/solrmonitor/; ruby metrics-tool.rb; ruby metrics-spike-detector.rb"
+      only_if { ::File.exists?("/opt/solr/solrmonitor/metrics-tool.rb") }
+    end
+  else
+    Chef::Log.info("Disabling the Medusa Metrics, since the flag is - #{node['enable_medusa_metrics']}")
+    cron "metrics-tool" do
+      user 'root'
+      action :delete
+    end
+  end
+
+  # Adding solr custom component
+
+  solr_custom_comp_version = node['solr_custom_component_version']
+
+  artifact_descriptor = "#{node['solr_custom_params']['solr_custom_comp_artifact']}:#{solr_custom_comp_version}:jar"
+  
+  if (solr_custom_comp_version =~ /SNAPSHOT/)
+    artifact_urlbase = node['solr_custom_params']['snapshot_urlbase']
+  else
+    artifact_urlbase = node['solr_custom_params']['release_urlbase']
+  end
+
+  solr_custom_comp_url, solr_custom_comp_version = SolrCustomComponentArtifact::get_artifact_url(artifact_descriptor, artifact_urlbase)
+
+  Chef::Log.info( "solr_custom_comp_url - #{solr_custom_comp_url} and solr_custom_comp_version -  #{solr_custom_comp_version}")
+
+  if (solr_custom_comp_version.to_s =~ /SNAPSHOT/)
+    solr_custom_comp_version = solr_custom_comp_version.gsub('-SNAPSHOT', '')
+  end
+
+  solr_custom_comp_jar = "solr-custom-components-#{solr_custom_comp_version}.jar"
+  solr_plugins_dir = "/app/solr#{node['solrmajorversion']}/plugins"
+
+  ["#{solr_plugins_dir}"].each { |dir|
+    Chef::Log.info("creating #{dir}")
+    directory dir do
+      owner node['solr']['user']
+      group node['solr']['user']
+      mode "0755"
+      recursive true
+      action :create
+    end
+  }
+
+  # Fetch the custom solr component artifact
+  remote_file "#{solr_plugins_dir}/#{solr_custom_comp_jar}" do
+    user 'app'
+    group 'app'
+    source solr_custom_comp_url
+    only_if { ::File.directory?("#{solr_plugins_dir}") }
+  end
+
+  solr_restart_warning = ruby_block 'solr_restart_warning' do
+    block do
+      Chef::Log.warn("Some Solr-files have changed and they will take effect on Solr restart. You can do so from the restart action for solrcloud component in Operations phase.")
+    end
+    action :nothing
+  end
+  # Note: No restart on update. User should manually restart (rolling restart) from action on update
+  if node['action_name'] =~ /add|replace/
+    service "solr#{node['solrmajorversion']}" do
+      action :start
+    end
+  elsif node['action_name'] == "update" && update_found(node)
+    solr_restart_warning.action(:run)
+  end
+  
 end
-
-
-if !node['config_name'].empty?
-  downloadconfig(node['solr_version'],node['zk_host_fqdns'],node['config_name'])
-  uploaddefaultconfig(node['solr_version'],node['zk_host_fqdns'],node['config_name'])
-end
-
-
-Chef::Log.info("Copying solrprocess script")
-template "/opt/nagios/libexec/check_solrprocess.sh" do
-  source "check_solrprocess.sh.erb"
-  owner node['solr']['user']
-  group node['solr']['user']
-  mode "0755"
-  action :create_if_missing
-end
-
-

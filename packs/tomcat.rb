@@ -1,5 +1,4 @@
 include_pack "genericlb"
-
 name "tomcat"
 owner "brett.bourquin@walmartlabs.com"
 description "Provides a Tomcat Servlet Container to deploy java web application workloads"
@@ -147,7 +146,7 @@ resource "tomcat-daemon",
          :cookbook => "oneops.1.daemon",
          :design => true,
          :requires => {
-             :constraint => "0..1",
+             :constraint => "1..1",
              :help => "Restarts Tomcat"
          },
          :attributes => {
@@ -180,7 +179,7 @@ resource "keystore",
 resource "artifact",
   :cookbook => "oneops.1.artifact",
   :design => true,
-  :requires => { "constraint" => "0..*", "services" => "*maven" },
+  :requires => { "constraint" => "1..*", "services" => "*maven" },
   :attributes => {
      :repository => '$OO_LOCAL{repository}',
      :location => '$OO_LOCAL{groupId}:$OO_LOCAL{artifactId}:$OO_LOCAL{extension}',

@@ -1,4 +1,4 @@
-PROPERTIES = ["name", "id", "server_auto_start", "bindings", "virtual_directory_path", "virtual_directory_physical_path", "application_path", "application_pool", "certificate_hash", "certificate_store_name" ]
+PROPERTIES = ["name", "id", "server_auto_start", "bindings", "virtual_directory_physical_path", "application_pool", "certificate_hash", "certificate_store_name" ]
 
 def whyrun_supported?
   true

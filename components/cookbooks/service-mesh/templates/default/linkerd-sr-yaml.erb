@@ -1,0 +1,44 @@
+# Created On : <%= Time.now.getutc %>
+
+admin:
+  port: 9990
+  ip: 0.0.0.0
+
+namers:
+- kind: com.w5t.sr
+  srProd: <%= @sr_prod_url %>
+  srNonProd: <%= @sr_nonprod_url %>
+  prod: <%= @is_prod_env %>
+
+  tenants:
+<%= @tenant_configs %>
+  requestTimeout: 10000
+  pollInterval: 5000
+#- kind: io.l5d.fs
+#  rootDir: src/test/resources/disco
+
+routers:
+- protocol: http
+  identifier:
+    kind: com.w5t.stratiHeaders
+  dtab: |
+    /svc => /wm;
+    /wm => /#/com.w5t.sr;
+  httpAccessLog: logs/access.log
+  label: int
+  loggers:
+  - kind: com.w5t.policy
+    consumerIds:
+    - 4711
+    - e091b4f7-9a2c-4895-9a1e-dc7e6e2f9537
+    - 441bc1df-1612-4570-a84f-aca3700891c3
+    maxResponseSize: 65535
+  servers:
+  - port: 4140
+    ip: 0.0.0.0
+
+telemetry:
+- kind: com.w5t.telemetry
+
+usage:
+  enabled: false

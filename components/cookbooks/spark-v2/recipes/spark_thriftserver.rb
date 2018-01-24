@@ -46,10 +46,10 @@ if is_client_only && configNode.has_key?('enable_thriftserver') && (configNode['
     if !passNodeText.empty?
       private_pass = passNodeText
     else
-      private_pass = ""
+      # Leave private_pass as the randomly generated value
     end
   else
-    private_pass = ""
+    # Leave private_pass as the randomly generated value
   end
 
   # Make sure the keystore directory exists
