@@ -603,7 +603,7 @@ resource "fqdn",
            ]
       }'
     },
-    'clouds' => {
+    'fqdnclouds' => {
       'description' => 'all clouds',
       'definition' => '{
          "returnObject": false,
