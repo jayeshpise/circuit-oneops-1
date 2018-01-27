@@ -524,7 +524,6 @@ end
 {:from => 'cloudrdbms', :to => 'user-app'},
 {:from => 'user-app', :to => 'volume-app'},
 {:from => 'user-app', :to => 'compute'},
-{:from => 'hostname', :to => 'compute'},
 {:from => 'cloudrdbms', :to => 'java'},
 {:from => 'java', :to => 'os'},
 {:from => 'cloudrdbms', :to => 'volume-app'},
@@ -544,6 +543,15 @@ end
     :from_resource => link[:from],
     :to_resource => link[:to],
     :attributes => {"flex" => false, "min" => 1, "max" => 1}
+end
+
+# if a compute is replace, touch-update hostname
+[ 'hostname' ].each do |from|
+  relation "#{from}::depends_on::compute",
+    :relation_name => 'DependsOn',
+    :from_resource => from,
+    :to_resource   => 'compute',
+    :attributes    => { 'propagate_to' => 'from' }
 end
 
 # managed_via
